@@ -67,25 +67,43 @@ jobs:
           --sort DESC \
           --max-items 1 \
           --query "taskDefinitionArns[0]" \
-          --output text)
-        echo "LATEST_TASK_DEF=$LATEST" >> $GITHUB_ENV
+          --output text || echo "")
+        
+        if [ -z "$LATEST" ] || [ "$LATEST" = "None" ]; then
+          echo "No existing task definition found."
+          echo "exists=false" >> $GITHUB_OUTPUT
+        else
+          echo "Found existing task definition: $LATEST"
+          echo "arn=$LATEST" >> $GITHUB_OUTPUT
+          echo "exists=true" >> $GITHUB_OUTPUT
+        fi
 
     - name: Download latest task definition
+      if: steps.latest-task-def.outputs.exists == 'true'
       run: |
         aws ecs describe-task-definition \
-          --task-definition $LATEST_TASK_DEF \
+          --task-definition ${{ steps.latest-task-def.outputs.arn }} \
           --region ${{ env.AWS_REGION }} \
           --query taskDefinition > .aws/task-definition.json
 
     - name: Update ECS task definition with new image
       id: task-def
+      if: steps.latest-task-def.outputs.exists == 'true'
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
         task-definition: .aws/task-definition.json
         container-name: peleg-container
         image: ${{ steps.build-image.outputs.image }}
 
+    - name: Check task definition exists
+      if: steps.latest-task-def.outputs.exists != 'true'
+      run: |
+        echo "Error: No existing task definition found for family '${{ env.ECS_TASK_FAMILY }}'"
+        echo "Please ensure the task definition is created first (e.g., via Terraform)"
+        exit 1
+
     - name: Deploy to ECS
+      if: steps.latest-task-def.outputs.exists == 'true'
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
         task-definition: ${{ steps.task-def.outputs.task-definition }}
