@@ -61,21 +61,24 @@ jobs:
     - name: Get latest ECS task definition ARN
       id: latest-task-def
       run: |
+        # Get the task definition ARN and filter out any invalid values
         LATEST=$(aws ecs list-task-definitions \
           --family-prefix ${{ env.ECS_TASK_FAMILY }} \
           --region ${{ env.AWS_REGION }} \
           --sort DESC \
           --max-items 1 \
           --query "taskDefinitionArns[0]" \
-          --output text || echo "")
+          --output text 2>/dev/null | \
+          grep -oE "^arn:aws:ecs:[^[:space:]]+" | head -1)
         
-        if [ -z "$LATEST" ] || [ "$LATEST" = "None" ]; then
-          echo "No existing task definition found."
-          echo "exists=false" >> $GITHUB_OUTPUT
-        else
+        # Validate it's a proper ARN (must start with arn:aws:ecs:)
+        if [ -n "$LATEST" ] && [[ "$LATEST" =~ ^arn:aws:ecs: ]]; then
           echo "Found existing task definition: $LATEST"
           echo "arn=$LATEST" >> $GITHUB_OUTPUT
           echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "No existing task definition found."
+          echo "exists=false" >> $GITHUB_OUTPUT
         fi
 
     - name: Download latest task definition
