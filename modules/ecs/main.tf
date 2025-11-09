@@ -1,5 +1,3 @@
-
-
 # ECS Cluster
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-cluster"
@@ -15,44 +13,91 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
-# Task Definition
+# CloudWatch Log Group (must exist before task runs)
+resource "aws_cloudwatch_log_group" "ecs_logs" {
+  name              = "/ecs/${var.project_name}"
+  retention_in_days = 30
+
+  tags = {
+    Name        = "${var.project_name}-logs"
+    Environment = var.environment
+  }
+}
+
+# IAM Role for ECS task execution (Fargate)
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "${var.project_name}-ecs-task-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+# Attach required AWS managed policy for Fargate execution
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# IAM Role for your application task (if needed)
+resource "aws_iam_role" "ecs_task_role" {
+  name = "${var.project_name}-ecs-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+# ECS Task Definition
 resource "aws_ecs_task_definition" "app" {
   family                   = "${var.project_name}-task"
-  network_mode            = "awsvpc"
+  network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                     = var.container_cpu
-  memory                  = var.container_memory
-  execution_role_arn      = aws_iam_role.ecs_task_execution_role.arn
-  task_role_arn           = aws_iam_role.ecs_task_role.arn
+  cpu                      = var.container_cpu
+  memory                   = var.container_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
 
-  container_definitions = jsonencode([
-    {
-  name      = "${var.project_name}-container"
-  image     = var.container_image
-      essential = true
+  container_definitions = jsonencode([{
+    name      = "${var.project_name}-container"
+    image     = var.container_image
+    essential = true
 
-      portMappings = [
-        {
-          containerPort = var.container_port
-          protocol      = "tcp"
-        }
-      ]
+    portMappings = [{
+      containerPort = var.container_port
+      protocol      = "tcp"
+    }]
 
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
-          "awslogs-region"        = data.aws_region.current.name
-          "awslogs-stream-prefix" = "ecs"
-        }
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
+        "awslogs-region"        = data.aws_region.current.name
+        "awslogs-stream-prefix" = "ecs"
       }
     }
-  ])
+  }])
 
   tags = {
     Name        = "${var.project_name}-task"
     Environment = var.environment
   }
+
+  depends_on = [aws_cloudwatch_log_group.ecs_logs] # ensure log group exists
 }
 
 # ECS Service
@@ -64,8 +109,9 @@ resource "aws_ecs_service" "app" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    security_groups = [aws_security_group.ecs_tasks.id]
     subnets         = var.private_subnet_ids
+    security_groups = [aws_security_group.ecs_tasks.id]
+    assign_public_ip = false  # Set true if subnets are public
   }
 
   load_balancer {
@@ -82,7 +128,33 @@ resource "aws_ecs_service" "app" {
   }
 }
 
-# Application Load Balancer
+# ECS Security Group
+resource "aws_security_group" "ecs_tasks" {
+  name        = "${var.project_name}-ecs-tasks-sg"
+  description = "ECS Tasks Security Group"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port       = var.container_port
+    to_port         = var.container_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id] # allow ALB traffic
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.project_name}-ecs-tasks-sg"
+    Environment = var.environment
+  }
+}
+
+# ALB and Target Group (unchanged)
 resource "aws_lb" "app" {
   name               = "${var.project_name}-alb"
   internal           = false
@@ -96,7 +168,6 @@ resource "aws_lb" "app" {
   }
 }
 
-# ALB Target Group
 resource "aws_lb_target_group" "app" {
   name        = "${var.project_name}-tg"
   port        = var.container_port
@@ -118,7 +189,6 @@ resource "aws_lb_target_group" "app" {
   }
 }
 
-# ALB Listener
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.app.arn
   port              = "80"
@@ -139,7 +209,6 @@ resource "aws_appautoscaling_target" "ecs_target" {
   service_namespace  = "ecs"
 }
 
-# CPU Auto Scaling Policy
 resource "aws_appautoscaling_policy" "cpu" {
   name               = "${var.project_name}-cpu-autoscaling"
   policy_type        = "TargetTrackingScaling"
@@ -154,6 +223,8 @@ resource "aws_appautoscaling_policy" "cpu" {
     target_value = 80
   }
 }
+
+
 
 # Security Group for ALB
 resource "aws_security_group" "alb" {
