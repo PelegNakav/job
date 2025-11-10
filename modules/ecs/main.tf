@@ -236,26 +236,43 @@ resource "aws_sns_topic_subscription" "ecs_alarm_emails" {
   endpoint  = each.value
 }
 
-# CloudWatch Alarm for Container Errors
-resource "aws_cloudwatch_metric_alarm" "container_errors" {
-  alarm_name          = "${var.project_name}-container-errors"
+# CloudWatch Alarm for Running Task Count
+resource "aws_cloudwatch_metric_alarm" "running_task_count" {
+  alarm_name          = "${var.project_name}-running-task-count"
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "1"
-  metric_name        = "ContainerErrors"
-  namespace          = "ECS/ContainerInsights"
-  period             = "300"
-  statistic          = "Sum"
-  threshold          = "0"
-  alarm_description   = "This metric monitors container errors"
-  alarm_actions      = [aws_sns_topic.ecs_alarms.arn]
+  evaluation_periods  = 1
+  threshold           = 0
+  alarm_description   = "Alerts when the ECS service is not running exactly 1 task"
+  alarm_actions       = [aws_sns_topic.ecs_alarms.arn]
+  threshold_metric_id = "expr1"
+  treat_missing_data  = "breaching"
 
-  dimensions = {
-    ClusterName = aws_ecs_cluster.main.name
-    ServiceName = aws_ecs_service.app.name
+  metric_query {
+    id          = "m1"
+    return_data = false
+
+    metric {
+      metric_name = "RunningTaskCount"
+      namespace   = "ECS/ContainerInsights"
+      period      = 60
+      stat        = "Average"
+
+      dimensions = {
+        ClusterName = aws_ecs_cluster.main.name
+        ServiceName = aws_ecs_service.app.name
+      }
+    }
+  }
+
+  metric_query {
+    id          = "expr1"
+    label       = "RunningTaskCountNotOne"
+    return_data = true
+    expression  = "IF(m1 > 1, 1, IF(m1 < 1, 1, 0))"
   }
 
   tags = {
-    Name        = "${var.project_name}-container-errors-alarm"
+    Name        = "${var.project_name}-running-task-count-alarm"
     Environment = var.environment
   }
 }
