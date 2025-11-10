@@ -218,6 +218,24 @@ resource "aws_cloudwatch_log_group" "ecs_logs" {
   }
 }
 
+# SNS Topic for Alarms
+resource "aws_sns_topic" "ecs_alarms" {
+  name = "${var.project_name}-${var.environment}-ecs-alarms"
+
+  tags = {
+    Name        = "${var.project_name}-ecs-alarms"
+    Environment = var.environment
+  }
+}
+
+resource "aws_sns_topic_subscription" "ecs_alarm_emails" {
+  for_each = toset(var.alarm_notification_emails)
+
+  topic_arn = aws_sns_topic.ecs_alarms.arn
+  protocol  = "email"
+  endpoint  = each.value
+}
+
 # CloudWatch Alarm for Container Errors
 resource "aws_cloudwatch_metric_alarm" "container_errors" {
   alarm_name          = "${var.project_name}-container-errors"
@@ -229,7 +247,7 @@ resource "aws_cloudwatch_metric_alarm" "container_errors" {
   statistic          = "Sum"
   threshold          = "0"
   alarm_description   = "This metric monitors container errors"
-  alarm_actions      = []  # Add SNS topic ARN here if you want notifications
+  alarm_actions      = [aws_sns_topic.ecs_alarms.arn]
 
   dimensions = {
     ClusterName = aws_ecs_cluster.main.name

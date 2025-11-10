@@ -11,3 +11,5 @@ private_subnet_cidrs = ["10.0.3.0/24", "10.0.4.0/24"]
 
 # Update these with your desired AZs
 availability_zones = ["eu-west-1a", "eu-west-1b"]
+
+region = "eu-west-1"

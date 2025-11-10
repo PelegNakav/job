@@ -30,9 +30,9 @@ variable "container_port" {
 }
 
 variable "container_image" {
-  description = "Container image to run (can be public Docker Hub or ECR image)"
+  description = "Container image to run "
   type        = string
-  default     = "nginxdemos/hello:latest"
+  default     = "peleg-repo:latest"
 }
 
 variable "desired_count" {
@@ -69,4 +69,10 @@ variable "health_check_path" {
   description = "Health check path for the ALB target group"
   type        = string
   default     = "/"
+}
+
+variable "alarm_notification_emails" {
+  description = "Email addresses to subscribe to the ECS alarm SNS topic"
+  type        = list(string)
+  default     = ["peleg.nakav2@gmai.com"]
 }

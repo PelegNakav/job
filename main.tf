@@ -9,7 +9,7 @@ terraform {
 }
 
 provider "aws" {
-  region = "eu-west-1"  # Ireland region
+  region = var.region  # Ireland region
 }
 
 module "vpc" {
