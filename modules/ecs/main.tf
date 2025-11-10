@@ -242,9 +242,8 @@ resource "aws_cloudwatch_metric_alarm" "running_task_count" {
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
-  alarm_description   = "Alerts when the ECS service is not running exactly 1 task"
+  alarm_description   = "Alerts when the ECS service is not running exactly 2 tasks"
   alarm_actions       = [aws_sns_topic.ecs_alarms.arn]
-  threshold_metric_id = "expr1"
   treat_missing_data  = "breaching"
 
   metric_query {
@@ -266,9 +265,9 @@ resource "aws_cloudwatch_metric_alarm" "running_task_count" {
 
   metric_query {
     id          = "expr1"
-    label       = "RunningTaskCountNotOne"
+    label       = "RunningTaskCountNotTwo"
     return_data = true
-    expression  = "IF(m1 > 1, 1, IF(m1 < 1, 1, 0))"
+    expression  = "ABS(m1 - 2)"
   }
 
   tags = {

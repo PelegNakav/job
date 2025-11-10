@@ -74,5 +74,5 @@ variable "health_check_path" {
 variable "alarm_notification_emails" {
   description = "Email addresses to subscribe to the ECS alarm SNS topic"
   type        = list(string)
-  default     = ["peleg.nakav2@gmai.com"]
+  default     = ["peleg.nakav2@gmail.com"]
 }
