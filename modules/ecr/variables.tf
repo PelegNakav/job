@@ -23,5 +23,5 @@ variable "image_tag_mutability" {
 variable "force_delete" {
   description = "Force deletion of repository even if it contains images"
   type        = bool
-  default     = false
+  default     = true
 }
