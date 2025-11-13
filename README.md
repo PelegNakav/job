@@ -1,244 +1,224 @@
-# AWS ECS Application Infrastructure
+# AWS ECS Infrastructure with CI/CD Pipeline
 
-Production-ready containerized app infrastructure on AWS. Built with Terraform and follows AWS Well-Architected Framework principles.
+This project sets up a complete AWS infrastructure for running containerized applications on ECS (Elastic Container Service) with automated CI/CD using GitHub Actions. It's built with Terraform and follows best practices for security, scalability, and monitoring.
 
-## Architecture Overview
+## What This Does
 
-Here's the basic flow:
+This infrastructure deploys:
+- A VPC with public and private subnets across multiple availability zones
+- An ECS Fargate cluster running your containerized application
+- An Application Load Balancer (ALB) for internet access
+- Auto-scaling based on CPU utilization
+- CloudWatch monitoring and alarms
+- An ECR repository for storing Docker images
+- A complete CI/CD pipeline that automatically builds and deploys on code changes
 
-```
-Internet → Application Load Balancer (public) → ECS Fargate Tasks (private)
-                                                      ↓
-                                              ECR, CloudWatch, VPC Endpoints
-```
-
-Users hit the load balancer, which routes traffic to containers running in private subnets. Those containers pull images from ECR and send logs to CloudWatch, all through VPC endpoints so they don't need internet access.
-
-## AWS Services
-
-### VPC
-
-Your private network in AWS. Think of it as your own isolated section of the cloud.
-
-We set up public subnets (for the load balancer) and private subnets (for containers). The private subnets don't have direct internet access, which is good for security. Containers live there and can't be reached directly from the internet.
-
-The VPC also has route tables that control where traffic goes, and an internet gateway so the public subnets can actually reach the internet.
-
-### ECS (Elastic Container Service)
-
-This is where we run Docker containers. We're using Fargate, which means AWS manages the servers for us - we just define what containers we want and ECS handles the rest.
-
-The cluster is just a logical grouping. The task definition is like a blueprint - it says "run this image with this much CPU and memory." The service keeps those tasks running and scales them up or down based on demand.
-
-No EC2 instances to manage, which is nice.
-
-### ECR (Elastic Container Registry)
-
-Private Docker registry. When you build a container image, it gets pushed here. ECS pulls from here when starting containers.
-
-We have image scanning enabled, so it automatically checks for known vulnerabilities. There's also a lifecycle policy that deletes old images to save on storage costs.
-
-### Application Load Balancer
-
-Sits in the public subnets and receives all incoming traffic. It distributes requests across healthy containers and does health checks. If a container goes down, it stops sending traffic there.
-
-The ALB also gives us a single DNS name instead of managing individual container IPs.
-
-### CloudWatch
-
-Where all the logs and metrics go. Container logs end up in CloudWatch Logs, and we have Container Insights enabled for better visibility into what's happening.
-
-We also set up alarms for things like container errors or high CPU usage. Useful for catching issues before they become problems.
-
-### VPC Endpoints
-
-This was important for our setup. Containers run in private subnets without internet access, but they still need to pull images from ECR and send logs to CloudWatch.
-
-VPC endpoints create private connections from the VPC to AWS services. So containers can access ECR, CloudWatch, and S3 without going through the internet. More secure and actually cheaper than using NAT gateways.
-
-We have endpoints for:
-- ECR API and DKR (for pulling images)
-- CloudWatch Logs (for sending logs)
-- S3 (gateway endpoint, in case we need it)
-
-### IAM Roles
-
-Two roles here:
-- Task execution role: Lets ECS pull images from ECR and write logs to CloudWatch
-- Task role: Permissions for the application code itself (if it needs to access other AWS services)
-
-Both follow least privilege - only the permissions they actually need.
-
-### Auto Scaling
-
-Monitors CPU usage and automatically adjusts the number of containers. We have it set to keep 2-4 containers running, scaling up when CPU gets high and down when it's low.
-
-This helps with both performance and cost - you're not paying for idle containers.
-
-### Security Groups
-
-Virtual firewalls. The ALB security group allows HTTP traffic from anywhere. The ECS tasks security group only allows traffic from the ALB. Everything else is blocked by default.
-
-## AWS Well-Architected Framework
-
-### Operational Excellence
-
-Everything is in Terraform, so infrastructure changes are version controlled and repeatable. The CI/CD pipeline (GitHub Actions) automatically builds and deploys when code is pushed.
-
-CloudWatch Container Insights gives us real-time metrics, and we have alarms set up for common issues. All logs are centralized in CloudWatch Logs.
-
-The GitHub Actions workflow uses OIDC to assume an IAM role, so no long-lived credentials stored in GitHub.
-
-### Security
-
-Containers run in private subnets with no public IPs. They can't be reached directly from the internet - all traffic goes through the load balancer.
-
-Security groups restrict network access. VPC endpoints let containers access AWS services without internet access, which is more secure and avoids NAT gateway costs.
-
-IAM roles follow least privilege. ECR images are scanned for vulnerabilities. Logs are encrypted at rest.
-
-We had an issue initially where containers couldn't send logs to CloudWatch because they were in private subnets without internet. Adding the CloudWatch Logs VPC endpoint fixed that.
-
-### Reliability
-
-Resources are spread across multiple availability zones. The load balancer distributes traffic and handles failures automatically. If a container dies, ECS replaces it.
-
-Auto scaling maintains the desired number of containers. Health checks ensure unhealthy containers are replaced.
-
-Since everything is in Terraform, we can recreate the entire infrastructure if needed. Container images are versioned in ECR.
-
-### Performance Efficiency
-
-Fargate means no server management overhead. Containers are sized appropriately (256 CPU units, 512 MB memory in our case, but adjust based on your needs).
-
-Auto scaling based on CPU utilization. VPC endpoints provide direct, private connections to AWS services with lower latency than going through the internet.
-
-Container Insights helps identify bottlenecks and optimize resource usage.
-
-### Cost Optimization
-
-With Fargate, you only pay for running containers. No idle EC2 instances. Auto scaling means you scale down during low traffic periods.
-
-VPC endpoints actually save money compared to NAT gateways for this use case. ECR lifecycle policies automatically clean up old images.
-
-We're using cost allocation tags so we can track spending by project and environment.
-
-## How It Works
-
-### Deployment
-
-1. Push code to GitHub
-2. GitHub Actions builds a Docker image
-3. Image gets pushed to ECR
-4. Task definition is updated with the new image
-5. ECS service does a rolling deployment
-6. New containers start, health checks pass, traffic shifts over
-7. Old containers are stopped
-
-The rolling deployment means zero downtime - new containers come up before old ones are stopped.
-
-### Request Flow
-
-1. User makes a request
-2. Hits the Application Load Balancer (in public subnet)
-3. ALB checks security group rules (allows HTTP)
-4. ALB routes to a healthy container (in private subnet)
-5. Container processes the request
-6. Container sends logs to CloudWatch via VPC endpoint
-7. Response goes back through ALB to the user
-
-### Container Startup
-
-1. ECS service starts a new task in a private subnet
-2. Task pulls the image from ECR via VPC endpoint
-3. Container starts running
-4. Logs start flowing to CloudWatch via VPC endpoint
-5. Health check passes
-6. ALB starts routing traffic to it
-7. Auto scaling monitors and adjusts if needed
-
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
-- AWS account with permissions to create the resources
-- Terraform installed (1.0 or later)
-- AWS CLI configured
-- GitHub repository with Actions enabled (for CI/CD)
+- AWS CLI configured with appropriate credentials
+- Terraform installed (>= 1.0)
+- A GitHub repository with the code
+- An IAM role in AWS for GitHub Actions (I created one manually called `github-peleg`)
 
-### Setup
+### Initial Setup
 
-1. Clone the repo:
-   ```bash
-   git clone <repo-url>
-   cd job
-   ```
+1. **Clone the repository and navigate to the project directory**
 
-2. Set your variables in `terraform.tfvars`:
-   ```
-   project_name = "your-project"
-   environment = "production"
-   vpc_cidr = "10.0.0.0/16"
-   ```
-
-3. Initialize and apply:
+2. **Initialize and deploy the infrastructure:**
    ```bash
    terraform init
-   terraform plan  # Review what will be created
-   terraform apply
+   terraform plan
+   terraform apply --auto-approve
    ```
 
-4. Set up GitHub secret:
-   - Add `AWS_ROLE_ARN` to your GitHub repository secrets
-   - This should be an IAM role that GitHub Actions can assume via OIDC
+   This will create the entire cloud environment, but **the ECS service won't work yet** because there are no images in ECR at this point.
 
-5. Push code to trigger the deployment pipeline
+3. **Set up GitHub Actions secrets:**
+   - Go to your GitHub repository settings
+   - Add a secret named `AWS_ROLE_ARN` with the ARN of your GitHub IAM role (the one called `github-peleg`)
 
-### Accessing the App
+4. **Trigger the CI/CD pipeline:**
+   - Push changes to the `app/` directory or the workflow file
+   - GitHub Actions will automatically:
+     - Build your Docker image
+     - Push it to ECR
+     - Deploy it to your ECS service
 
-After deployment, get the load balancer DNS name:
+
+## Architecture Overview
+
+The infrastructure is organized into three Terraform modules:
+
+### 1. VPC Module (`modules/vpc/`)
+
+This module creates the networking foundation:
+- **VPC** with a CIDR block (default: `10.0.0.0/16`)
+- **4 Subnets** split across 2 availability zones:
+  - 2 public subnets for the Application Load Balancer
+  - 2 private subnets for ECS tasks (containers)
+- **Internet Gateway** for public internet access
+- **NAT Gateway** (one per AZ) so private subnets can reach the internet for pulling images
+- **Route tables** properly configured for public and private subnets
+- **VPC Endpoints** for secure, private communication with AWS services:
+  - ECR API endpoint (for pulling images)
+  - ECR DKR endpoint (Docker registry)
+  - CloudWatch Logs endpoint (for sending logs)
+  - S3 Gateway endpoint (available for future use, though not currently used in this project)
+
+**Why VPC Endpoints?** Since ECS tasks run in private subnets without direct internet access, VPC endpoints allow them to communicate with AWS services (like ECR and CloudWatch) without going through the internet. This improves security and can reduce costs compared to NAT Gateway data transfer.
+
+### 2. ECR Module (`modules/ecr/`)
+
+This module sets up the container registry:
+- **ECR Repository** for storing Docker images
+- **Image scanning** enabled for security
+- **Lifecycle policy** that keeps the last 30 images (automatically cleans up old ones)
+- **Repository policy** that allows ECS to pull images
+
+### 3. ECS Module (`modules/ecs/`)
+
+This is the heart of the application infrastructure:
+- **ECS Cluster** with Container Insights enabled for monitoring
+- **ECS Service** running on Fargate (serverless containers)
+- **Task Definition** with CPU, memory, and container configuration
+- **Application Load Balancer** (ALB) that exposes the app to the internet
+- **Target Group** with health checks
+- **Auto Scaling** configured to:
+  - Maintain at least 2 running tasks
+  - Scale up to 4 tasks when CPU utilization exceeds 80%
+  - Scale down when CPU drops
+- **Security Groups**:
+  - ALB security group (allows HTTP traffic from internet)
+  - ECS tasks security group (only allows traffic from ALB)
+- **CloudWatch Logs** for container logs (30-day retention)
+- **SNS Topic** for alarm notifications
+- **CloudWatch Alarm** that monitors the running task count and alerts when it's not exactly 2 tasks
+
+## Monitoring & Alarms
+
+The infrastructure includes comprehensive monitoring:
+
+- **CloudWatch Logs**: All container logs are automatically sent to CloudWatch with a 30-day retention period
+- **Container Insights**: Enabled on the ECS cluster for detailed metrics
+- **CloudWatch Alarm**: Monitors the running task count and sends an email alert via SNS when the count deviates from the expected value (currently set to 2 tasks)
+
+
+
+## CI/CD Pipeline
+
+The GitHub Actions workflow (`.github/workflows/deploy.yml`) automatically:
+
+1. **Builds** the Docker image from the `app/` directory
+2. **Pushes** it to ECR with two tags:
+   - A unique tag based on the Git commit SHA
+   - A `latest` tag
+3. **Updates** the ECS task definition with the new image
+4. **Deploys** the new task definition to the ECS service
+5. **Waits** for the service to stabilize before completing
+
+The pipeline triggers on:
+- Pushes to the `main` branch that affect files in `app/` or the workflow file
+- Pull requests to `main` (for testing)
+
+## Project Structure
+
+```
+.
+├── main.tf                 # Root module that ties everything together
+├── variables.tf            # Root-level variables
+├── terraform.tfvars       # Your configuration values
+├── modules/
+│   ├── vpc/               # VPC, subnets, networking
+│   │   ├── main.tf
+│   │   ├── vpc_endpoints.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── ecr/               # Container registry
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── ecs/               # ECS cluster, service, ALB, monitoring
+│       ├── main.tf
+│       ├── iam.tf         # IAM roles for ECS
+│       ├── data.tf        # Data sources
+│       ├── variables.tf
+│       └── outputs.tf
+├── app/                   # Your application code
+│   ├── Dockerfile
+│   └── index.html
+└── .github/
+    └── workflows/
+        └── deploy.yml     # CI/CD pipeline
+```
+
+## Configuration
+
+Key variables you can customize in `terraform.tfvars`:
+
+- `project_name`: Used for naming all resources
+- `environment`: Environment tag (dev/staging/prod)
+- `vpc_cidr`: VPC CIDR block
+- `public_subnet_cidrs`: CIDR blocks for public subnets
+- `private_subnet_cidrs`: CIDR blocks for private subnets
+- `availability_zones`: AWS availability zones to use
+- `region`: AWS region
+
+ECS-specific settings are in `main.tf`:
+- `desired_count`: Number of tasks to run (default: 2)
+- `min_count` / `max_count`: Auto-scaling limits
+- `container_cpu` / `container_memory`: Resource allocation
+- `container_port`: Port your app listens on
+
+## Getting the Application URL
+
+After deployment, get your ALB DNS name:
+
 ```bash
 terraform output alb_dns_name
 ```
 
-Visit that URL in your browser.
+Then visit `http://<alb-dns-name>` in your browser. The ALB listens on port 80 (HTTP).
 
-## Monitoring
+## Cleanup
 
-CloudWatch Container Insights is enabled, so you get detailed metrics about your containers. Check the ECS console or CloudWatch dashboards.
+To destroy all resources:
 
-Key things to watch:
-- CPU utilization (we scale at 80%)
-- Memory usage
-- Request count and error rate
-- Number of running tasks (verify auto scaling is working)
+```bash
+terraform destroy
+```
 
-We have alarms set up for container errors and high CPU. You can add more based on what you need.
+**Note**: Make sure to empty the ECR repository first if you want to avoid errors:
+```bash
+aws ecr list-images --repository-name peleg-repo --query 'imageIds[*]' --output json | \
+  jq -r '.[] | "\(.imageDigest)"' | \
+  xargs -I {} aws ecr batch-delete-image --repository-name peleg-repo --image-ids imageDigest={}
+```
+if the repo isnt empty it will not be destroyed with terraform destroy
+## Notes
 
-## Maintenance
 
-Regular stuff:
-- Check CloudWatch logs for errors
-- Review AWS billing to see actual costs
-- Keep base images updated
-- Check ECR scan results for vulnerabilities
-- Test that you can recreate infrastructure from Terraform
+- The GitHub Actions IAM role (`github-peleg`) was created manually
+- The alarm is currently configured to alert when the running task count is not exactly 2
 
-For updates:
-- Infrastructure changes: edit Terraform files and apply
-- Application updates: just push code, CI/CD handles it
-- Config changes: update variables and redeploy
+## Original Requirements
 
-## Common Issues
+This project was built to fulfill the following requirements:
 
-**Containers can't pull images or send logs**: Make sure VPC endpoints are created and security groups allow traffic to them. We had this issue initially - containers in private subnets need the endpoints to access AWS services.
+1. ✅ AWS infrastructure automation with Terraform
+   - VPC with Internet Gateway
+   - 4 Subnets (2 public, 2 private)
+   - Proper networking configuration
 
-**High costs**: Check if auto scaling is working. You might have more containers running than needed. Also verify ECR lifecycle policies are cleaning up old images.
+2. ✅ ECS deployment
+   - "Hello World" container on ECS cluster
+   - Service Auto Scaling (2+ running tasks)
+   - Application Load Balancer with internet access
+   - Tasks in private subnets
+   - Monitoring and alarms for container errors
 
-**Deployment failures**: Check the GitHub Actions logs. Common issues are IAM permissions or the task definition not being found (the workflow handles this now).
-
-## Resources
-
-- [AWS Well-Architected Framework](https://aws.amazon.com/architecture/well-architected/)
-- [ECS Best Practices](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/intro.html)
-- [Terraform AWS Provider Docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+3. ✅ CI/CD pipeline
+   - GitHub Actions automation
+   - Automatic Docker image build and push to ECR
+   - Automatic ECS deployment on code changes
