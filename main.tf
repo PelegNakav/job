@@ -39,7 +39,7 @@ module "ecs" {
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
   public_subnet_ids  = module.vpc.public_subnet_ids
-  container_image    = module.ecr.repository_url  # Use the ECR repository URL
+  container_image = "${module.ecr.repository_url}:latest"  # Use the ECR repository URL
 
   desired_count     = 2
   min_count         = 2
